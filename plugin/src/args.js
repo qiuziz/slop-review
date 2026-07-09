@@ -11,8 +11,8 @@ export const VALID_SCOPES = new Set(["base", "last-commit", "uncommitted", "all"
 
 // CLI scope -> initial tab in the web UI.
 export const INITIAL_TAB = {
-  base: "git-diff",
-  uncommitted: "git-diff",
+  base: "all-files",
+  uncommitted: "all-files",
   "last-commit": "last-commit",
   all: "all-files",
 };
