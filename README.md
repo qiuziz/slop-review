@@ -1,6 +1,6 @@
 # slop-review
 
-A native diff review window for terminal coding agents, powered by [Glimpse](https://github.com/hazat/glimpse) and [Monaco](https://microsoft.github.io/monaco-editor/). Ships for **[Claude Code](https://docs.anthropic.com/en/docs/claude-code)**, **[Codex CLI](https://github.com/openai/codex)**, and **[pi](https://pi.dev)** — review the slop before you ship it.
+A diff review UI for terminal coding agents, powered by [Monaco](https://microsoft.github.io/monaco-editor/). For **[Claude Code](https://docs.anthropic.com/en/docs/claude-code)** and **[Codex CLI](https://github.com/openai/codex)** it opens as a **local HTML server in your browser**; for **[pi](https://pi.dev)** it uses the [Glimpse](https://github.com/hazat/glimpse) native window — review the slop before you ship it.
 
 - In **Claude Code** it adds a `/slop-review` slash command.
 - In **Codex CLI** it ships as a `slop-review` skill (auto-invoked when you ask for a review, or explicitly via `@slop-review`).
@@ -8,8 +8,8 @@ A native diff review window for terminal coding agents, powered by [Glimpse](htt
 
 All three:
 
-1. Open a native review window
-2. Default to a **PR-style review** of all changes since your branch diverged from the base branch (auto-detected: `origin/HEAD` → `origin/main` → `main` → `origin/master` → `master`), and also support `last-commit` and `uncommitted` modes — see [Scopes](#scopes)
+1. Open a review window — your browser for Claude Code / Codex, the Glimpse native window for pi
+2. Default to showing **all files** (so you can browse context); a **Git diff** tab shows the PR-style diff of all changes since your branch diverged from the base branch (auto-detected: `origin/HEAD` → `origin/main` → `main` → `origin/master` → `master`). Also supports `last-commit` and `uncommitted` modes — see [Scopes](#scopes)
 3. Show a collapsible sidebar with fuzzy file search and git status markers
 4. Lazy-load file contents on demand as you switch files and scopes
 5. Let you draft comments on the original side, modified side, or whole file
@@ -106,13 +106,14 @@ Then restart Codex.
 | Codex CLI | GitHub marketplace (`dbachelder/slop-review`) | `codex plugin marketplace upgrade slop-review` |
 
 For Claude Code and Codex, the GitHub marketplace clone runs a one-time
-`npm install` inside the plugin checkout on first invocation — that's what
-installs [`glimpseui`](https://www.npmjs.com/package/glimpseui) and builds
-its per-platform native helper. Codex sets `CLAUDE_PLUGIN_ROOT` for plugin
-shell calls so the same dispatcher works in both agents with no
-special-casing. A stamp file under `plugin/node_modules/` makes the
-dispatcher skip `npm install` unless `plugin/package.json` actually
-changed.
+`npm install` inside the plugin checkout on first invocation — this still
+pulls [`glimpseui`](https://www.npmjs.com/package/glimpseui) (kept so the
+**pi** extension keeps working), but Claude Code and Codex themselves don't
+build or use its native helper; they open the review as a browser HTML
+server instead. Codex sets `CLAUDE_PLUGIN_ROOT` for plugin shell calls so
+the same dispatcher works in both agents with no special-casing. A stamp
+file under `plugin/node_modules/` makes the dispatcher skip `npm install`
+unless `plugin/package.json` actually changed.
 
 ### Standalone CLI / development install
 
@@ -138,6 +139,7 @@ This is a fork of **[badlogic/pi-diff-review](https://github.com/badlogic/pi-dif
 - Adds a pi extension under `plugin/extensions/pi/` that registers `/slop-review` in pi (parallel to the upstream's `/diff-review`) and uses upstream's idiomatic `setEditorText` flow — same UX as the upstream.
 - Adds PR-style review (everything since merge-base with the auto-detected base branch) as the default scope, with explicit `last-commit`, `uncommitted`, and `all` modes also available.
 - Keeps `plugin/web/index.html` and `plugin/web/app.js` from the upstream essentially unchanged.
+- **Replaces the Glimpse native window with a local HTML review server for Claude Code and Codex**: `plugin/bin/slop-review.js` now starts a `localhost` HTTP server and opens your browser instead of opening a Glimpse window. The browser UI still talks to the same `web/` assets, and the `FEEDBACK_FILE` / `REVIEW_CANCELLED` stdout contract is unchanged, so the host adapters and agents need no changes. (The **pi** extension still uses Glimpse — see [Requirements](#requirements) and [How it works](#how-it-works).)
 
 If you only use pi and just want the upstream behavior, install [`badlogic/pi-diff-review`](https://github.com/badlogic/pi-diff-review) instead. Please ⭐ the upstream regardless.
 
@@ -146,8 +148,8 @@ If you only use pi and just want the upstream behavior, install [`badlogic/pi-di
 - macOS, Linux, or Windows
 - Node.js 20+
 - [Claude Code](https://docs.anthropic.com/en/docs/claude-code), [Codex CLI](https://github.com/openai/codex), **or** [pi](https://pi.dev)
-- Internet access at runtime for the Tailwind and Monaco CDNs used by the review window
-- **Native build toolchain** — Glimpse compiles a per-platform native helper on first install:
+- Internet access at runtime for the Tailwind and Monaco CDNs used by the review UI (**Claude Code / Codex browser mode won't render offline**; pi's Glimpse window bundles its own assets)
+- **Native build toolchain (pi only)** — Glimpse compiles a per-platform native helper on first install:
   - **macOS**: Xcode Command Line Tools (`xcode-select --install`)
   - **Linux**: Rust (https://rustup.rs) + GTK4/WebKit2GTK dev packages
     - Fedora: `dnf install gtk4-devel webkitgtk6.0-devel gtk4-layer-shell-devel`
@@ -155,7 +157,7 @@ If you only use pi and just want the upstream behavior, install [`badlogic/pi-di
     - Arch: `pacman -S gtk4 webkitgtk-6.0 gtk4-layer-shell`
   - **Windows**: .NET 8 SDK
 
-  Claude Code and some other agents run `npm install --ignore-scripts` when materializing plugins, which suppresses Glimpse's normal postinstall build. `plugin/bin/plugin-run.sh` detects this and re-builds the helper explicitly on first invocation, so you'll see a one-time delay (a few seconds for Swift, longer for Rust) before the review window opens.
+  This only affects **pi**: Claude Code and Codex run the review as a browser HTML server and never build the Glimpse helper. `plugin/bin/plugin-run.sh` still re-builds the helper explicitly on first invocation for pi, so pi users see a one-time delay (a few seconds for Swift, longer for Rust) before the review window opens.
 
 ### Windows notes
 
@@ -213,7 +215,7 @@ Or invoke it explicitly:
 
 ### What happens
 
-A native window opens. Browse files, leave inline or whole-file comments, then click **Submit feedback**. The CLI writes your feedback to `$TMPDIR/slop-review-<timestamp>.md` and prints the path. The agent then reads the file (visible in the UI as a `Read` / file-read tool call) and addresses each item. Click **Cancel** or close the window to abort.
+For **Claude Code / Codex**, a local review server starts and your browser opens the review UI. For **pi**, a Glimpse native window opens. Browse files, leave inline or whole-file comments, then click **Submit feedback**. The CLI writes your feedback to `$TMPDIR/slop-review-<timestamp>.md` and prints the path. The agent then reads the file (visible in the UI as a `Read` / file-read tool call) and addresses each item. In the browser UI, click **Cancel** or send Ctrl-C to abort — **closing the browser tab does not cancel**. (In pi, press `Escape` or close the window to cancel.)
 
 ### Standalone CLI
 
@@ -228,7 +230,7 @@ Contract:
 | Outcome | stdout | exit |
 |---|---|---|
 | User submits feedback | `FEEDBACK_FILE: <absolute path>\n` | `0` |
-| User cancels / closes window / no reviewable files | `REVIEW_CANCELLED\n` | `0` |
+| User cancels (Cancel button / Ctrl-C) / no reviewable files | `REVIEW_CANCELLED\n` | `0` |
 | Bad arguments | (nothing; usage on stderr) | `2` |
 | Other error | (nothing; error on stderr) | `1` |
 
@@ -259,9 +261,9 @@ In `base` mode, the "git diff" tab in the window is relabelled `vs <base-ref>` s
   Agent                     bash plugin-run.sh                slop-review
   /slop-review        ───────────────────────────────────►    (Node CLI)
   @slop-review                                                     │
-                                                                   │ glimpseui
+                                                                   │ localhost HTTP server
                                                                    ▼
-                          "FEEDBACK_FILE: <path>"             Native window
+                          "FEEDBACK_FILE: <path>"             Browser tab
                        ◄──────────────────────────            (Monaco diff)
   Read tool: <path>
         │
@@ -269,16 +271,18 @@ In `base` mode, the "git diff" tab in the window is relabelled `vs <base-ref>` s
   feedback rendered in chat, agent addresses each item
 ```
 
+> **Note (Claude Code / Codex):** the review runs as a `localhost` HTML server opened in your browser. **Closing the tab does not cancel** — use the **Cancel** button or Ctrl-C. The `web/` UI loads Tailwind and Monaco from public CDNs, so it needs internet access and won't render offline. (The **pi** extension still uses a Glimpse native window — see above.)
+
 The two-step (`Bash` → `Read`) flow is what makes the review visible in the
 chat UI: the bash output alone gets folded into the prompt as context, but
 the subsequent `Read` of the feedback file shows up as a regular tool call
 with the full file contents.
 
-- **`plugin/bin/slop-review.js`** — CLI entry. Parses arguments, resolves the base ref + merge-base when in `base` mode, opens the Glimpse window, handles file-content requests. On submit, writes the composed prompt to `$TMPDIR/slop-review-<ts>.md` and prints `FEEDBACK_FILE: <path>` to stdout. On cancel, prints `REVIEW_CANCELLED`.
+- **`plugin/bin/slop-review.js`** — CLI entry (Claude Code / Codex). Parses arguments, resolves the base ref + merge-base when in `base` mode, starts a `localhost` HTTP review server and opens your browser, handles file-content requests over HTTP. On submit, writes the composed prompt to `$TMPDIR/slop-review-<ts>.md` and prints `FEEDBACK_FILE: <path>` to stdout. On cancel (Cancel button / Ctrl-C), prints `REVIEW_CANCELLED`.
 - **`plugin/bin/plugin-run.sh`** — Plugin dispatcher. Resolves the plugin root from `$CLAUDE_PLUGIN_ROOT` (set by both Claude Code and Codex), `npm install`s on first run, then exec's the CLI.
 - **`plugin/src/git.js`** — Git scope/diff loader (ported from `src/git.ts`).
 - **`plugin/src/prompt.js`** — Feedback prompt composer (ported verbatim from `src/prompt.ts`).
-- **`plugin/src/ui.js`** — Inlines `web/index.html` + `web/app.js` for the Glimpse window.
+- **`plugin/src/ui.js`** — Inlines `web/index.html` + `web/app.js` into a single self-contained HTML doc, served by the localhost review server (Claude Code / Codex) or opened by the Glimpse window (pi).
 - **`plugin/web/`** — Static UI assets (Monaco, Tailwind via CDN, app logic). Copied from upstream.
 - **`plugin/commands/slop-review.md`** — Claude Code slash command. Forwards `$ARGUMENTS` to the dispatcher, then instructs Claude to `Read` the feedback file and address each item.
 - **`plugin/skills/slop-review/SKILL.md`** — Codex skill. Same instructions, formatted as a skill that the model auto-loads when the user asks for a review.

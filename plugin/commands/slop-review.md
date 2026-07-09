@@ -1,15 +1,15 @@
 ---
-description: Open a native diff review window (Monaco-powered) and address the resulting feedback
+description: Open the Monaco-powered diff review UI in your browser (a local HTML server) and address the resulting feedback
 argument-hint: "[base|last-commit|uncommitted|all] [--base <ref>]"
 ---
 
 # /slop-review
 
-Open the native diff review window so the user can leave inline / file-level / overall comments on the current changes (a.k.a. the slop), then address each comment.
+Open the diff review UI in your browser so the user can leave inline / file-level / overall comments on the current changes (a.k.a. the slop), then address each comment.
 
 ## Step 1 — run the dispatcher
 
-Invoke this exact shell command using your shell/bash tool. The window will block until the user clicks **Submit feedback** or closes it, so this call may take a long time — that is expected. Do **not** run anything else in parallel; wait for it to finish.
+Invoke this exact shell command using your shell/bash tool. It starts a local HTTP review server and opens your browser, then blocks until the user clicks **Submit feedback** or **Cancel**, or you send Ctrl-C. **Closing the browser tab does not cancel** the review — use the Cancel button or Ctrl-C. This call may take a long time — that is expected. Do **not** run anything else in parallel; wait for it to finish.
 
 ```bash
 if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -x "${CLAUDE_PLUGIN_ROOT}/bin/plugin-run.sh" ]; then
@@ -41,3 +41,8 @@ Read the captured stdout from the previous step:
 - **anything else** (e.g. an error) → surface the error to the user verbatim and stop.
 
 Status / progress messages from the dispatcher are written to **stderr**, not stdout, so they don't affect the parsing above.
+
+## Notes
+
+- The review UI loads Tailwind and Monaco from public CDNs, so the browser needs internet access — it will **not** render offline.
+- **Closing the browser tab does not cancel** the review. Use the **Cancel** button in the UI or send Ctrl-C to abort; otherwise the command stays blocked until you act.

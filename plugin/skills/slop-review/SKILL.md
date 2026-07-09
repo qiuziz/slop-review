@@ -1,11 +1,11 @@
 ---
 name: slop-review
-description: Open the native, Monaco-powered diff review window so the user can leave inline / file-level / overall comments on the current changes (the AI slop), then address each comment. Use this when the user asks to "review my changes", "review the slop", "review my diff", "open a diff review", "open the review window", "get feedback on my work", "do a PR-style review", "show me what I changed and let me comment", or types `@slop-review` explicitly. Defaults to a PR-style review of all commits + uncommitted changes since the merge-base with the auto-detected base branch (origin/HEAD → origin/main → main → origin/master → master); also supports last-commit, uncommitted, and all-files modes.
+description: Open the Monaco-powered diff review UI in the user's browser (a local HTML server) so the user can leave inline / file-level / overall comments on the current changes (the AI slop), then address each comment. Use this when the user asks to "review my changes", "review the slop", "review my diff", "open a diff review", "open the review window", "get feedback on my work", "do a PR-style review", "show me what I changed and let me comment", or types `@slop-review` explicitly. Defaults to showing all files (browse context); a Git diff tab shows the PR-style diff of all commits + uncommitted changes since the merge-base with the auto-detected base branch (origin/HEAD → origin/main → main → origin/master → master); also supports last-commit, uncommitted, and all-files modes.
 ---
 
 # slop-review
 
-Open the native diff review window, wait for the user to submit feedback, then address each comment they wrote.
+Open the diff review UI in the user's browser, wait for the user to submit feedback, then address each comment they wrote.
 
 ## When to use
 
@@ -32,7 +32,7 @@ else
 fi
 ```
 
-Agent plugin hosts expose the plugin checkout through an environment variable such as `${CLAUDE_PLUGIN_ROOT}` or `${CODEX_PLUGIN_ROOT}`. The shell block above checks both names, then falls back to a globally installed `slop-review` binary. On first invocation the dispatcher does a one-time `npm install` inside the plugin checkout to pull `glimpseui` and build its native helper, then exec's the CLI.
+Agent plugin hosts expose the plugin checkout through an environment variable such as `${CLAUDE_PLUGIN_ROOT}` or `${CODEX_PLUGIN_ROOT}`. The shell block above checks both names, then falls back to a globally installed `slop-review` binary. On first invocation the dispatcher does a one-time `npm install` inside the plugin checkout (this still pulls `glimpseui` so the **pi** extension keeps working), then exec's the CLI. **Claude Code and Codex reviews run as a local HTML server in your browser and do not require Glimpse's native helper to be built.**
 
 `<args>` is one of:
 
@@ -44,7 +44,7 @@ Agent plugin hosts expose the plugin checkout through an environment variable su
 | Override the auto-detected base branch | `--base <ref>` |
 | Just browse the working tree (debug) | `all` |
 
-A native window will open. **The shell call will block until the user clicks Submit feedback or closes the window — this can take minutes. Do not run other tool calls in parallel; just wait.**
+A local review server starts and your browser opens the review UI. **The shell call blocks until the user clicks Submit feedback or Cancel, or you send Ctrl-C — this can take minutes. Do not run other tool calls in parallel; just wait.** Closing the browser tab does **not** cancel the review; use the Cancel button or Ctrl-C.
 
 ## Step 2 — interpret the dispatcher's stdout
 
@@ -59,5 +59,6 @@ The dispatcher writes a single line of stdout. Status / progress messages are on
 ## Notes
 
 - The CLI writes its feedback file under `$TMPDIR/slop-review-<timestamp>.md`. It's a regular file you can `cat`, `wc`, etc.
-- If the dispatcher reports that `glimpseui`'s native helper failed to build, follow the exact remediation it prints (usually: install Xcode Command Line Tools on macOS, then re-run).
+- If the dispatcher reports that `glimpseui`'s native helper failed to build (only relevant when using the **pi** extension), follow the exact remediation it prints (usually: install Xcode Command Line Tools on macOS, then re-run).
 - This skill never modifies files on its own — it only opens the review UI. All code changes happen in Step 2 after you've read the user's feedback.
+- The review UI loads Tailwind and Monaco from public CDNs, so the browser needs internet access — it will **not** render offline.
