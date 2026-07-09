@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// slop-review — Glimpse-powered native diff review window for AI coding agents.
+// slop-review — browser-based local HTML review server for AI coding agents.
 // Adapted from pi-diff-review (https://github.com/badlogic/pi-diff-review) by Mario Zechner.
 //
 // Usage:
@@ -19,15 +19,14 @@
 //
 // On submit: writes the composed feedback to $TMPDIR/slop-review-<ts>.md and prints
 //            "FEEDBACK_FILE: <path>" to stdout.
-// On cancel / window close: prints "REVIEW_CANCELLED" to stdout.
+// On cancel / browser tab closed via Cancel button / SIGINT: prints "REVIEW_CANCELLED" to stdout.
 // On error: prints message to stderr and exits 1.
 
-import { existsSync, readFileSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
-import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
-import { open } from "glimpseui";
+import { join } from "node:path";
+import { createServer } from "node:http";
+import { spawn } from "node:child_process";
 import { INITIAL_TAB, parseArgs } from "../src/args.js";
 import {
   getRepoRoot,
@@ -39,7 +38,7 @@ import {
 import { composeReviewPrompt } from "../src/prompt.js";
 import { buildReviewHtml } from "../src/ui.js";
 
-const HELP = `slop-review — open a native diff review window for AI coding agents.
+const HELP = `slop-review — open a local HTML review server in your browser for AI coding agents.
 
 Usage:
   slop-review [scope] [--base <ref>] [--help]
@@ -56,44 +55,40 @@ Options:
   -h, --help    show this help and exit
 `;
 
-function escapeForInlineScript(value) {
-  return value.replace(/</g, "\\u003c").replace(/>/g, "\\u003e").replace(/&/g, "\\u0026");
-}
-
 function log(...args) {
   process.stderr.write(args.join(" ") + "\n");
 }
 
-// glimpseui's postinstall builds a per-platform native helper (Swift on macOS,
-// cargo on Linux, dotnet on Windows). When the toolchain is missing it skips
-// the build and writes a `.glimpse-build-skipped` marker. We surface that as a
-// clear, actionable error instead of letting glimpseui blow up later.
-function preflightGlimpse() {
-  let glimpseEntry;
+function openBrowser(url) {
+  let cmd, args;
+  if (process.platform === "darwin") {
+    cmd = "open"; args = [url];
+  } else if (process.platform === "win32") {
+    cmd = "cmd"; args = ["/c", "start", "", url];
+  } else {
+    cmd = "xdg-open"; args = [url];
+  }
   try {
-    const require = createRequire(import.meta.url);
-    glimpseEntry = require.resolve("glimpseui");
+    const child = spawn(cmd, args, { stdio: "ignore", detached: true });
+    child.unref();
   } catch {
-    process.stderr.write(
-      "glimpseui is not installed. If you're running this directly, do `npm install`\n" +
-      "in the project root. If you're running via the Claude Code plugin, the\n" +
-      "plugin-run.sh dispatcher should have done that for you — please file a bug.\n",
-    );
-    process.exit(1);
+    /* 浏览器唤起失败不影响服务本身 */
   }
-  // Walk up from <root>/src/glimpse.mjs to <root>/. The marker is written there
-  // by glimpseui's scripts/postinstall.mjs when the native build is skipped.
-  const marker = join(dirname(dirname(glimpseEntry)), ".glimpse-build-skipped");
-  if (existsSync(marker)) {
-    const detail = readFileSync(marker, "utf8").trim();
-    process.stderr.write(
-      `glimpseui's native helper was not built:\n  ${detail}\n\n` +
-      "After installing the required toolchain, run:\n" +
-      "  npm rebuild -g glimpseui    # if installed globally\n" +
-      "  npm rebuild glimpseui       # if installed locally\n",
-    );
-    process.exit(1);
-  }
+}
+
+function readJsonBody(req) {
+  return new Promise((resolve, reject) => {
+    let data = "";
+    req.on("data", (chunk) => {
+      data += chunk;
+      if (data.length > 1_000_000) req.destroy();
+    });
+    req.on("end", () => {
+      try { resolve(data ? JSON.parse(data) : {}); }
+      catch (err) { reject(err); }
+    });
+    req.on("error", reject);
+  });
 }
 
 async function resolveScopeContext(repoRoot, args) {
@@ -128,6 +123,93 @@ async function resolveScopeContext(repoRoot, args) {
   };
 }
 
+/**
+ * 启动本地 diff 评审 HTTP 服务（取代 Glimpse 原生窗口）。
+ * @returns {{ server: import("node:http").Server, url: string, resultPromise: Promise<object> }}
+ */
+export async function startReviewServer({ html, files, repoRoot, gitDiffOriginalRef, loadFileContents }) {
+  const fileMap = new Map(files.map((f) => [f.id, f]));
+  const contentCache = new Map();
+  const load = (file, scope) => {
+    const key = `${scope}:${file.id}`;
+    if (contentCache.has(key)) return contentCache.get(key);
+    const pending = loadFileContents(repoRoot, file, scope, { gitDiffOriginalRef });
+    contentCache.set(key, pending);
+    return pending;
+  };
+
+  let settleResult;
+  let settled = false;
+  const resultPromise = new Promise((resolve) => { settleResult = resolve; });
+  const finish = (value) => {
+    if (settled) return;
+    settled = true;
+    settleResult(value);
+  };
+
+  const server = createServer(async (req, res) => {
+    try {
+      if (req.method === "GET" && req.url === "/") {
+        res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+        res.end(html);
+        return;
+      }
+      if (req.method === "POST" && req.url === "/api/file") {
+        const body = await readJsonBody(req);
+        const file = fileMap.get(body.fileId);
+        if (file == null) {
+          res.writeHead(200, { "content-type": "application/json" });
+          res.end(JSON.stringify({
+            type: "file-error", requestId: body.requestId, fileId: body.fileId,
+            scope: body.scope, message: "Unknown file requested.",
+          }));
+          return;
+        }
+        try {
+          const contents = await load(file, body.scope);
+          res.writeHead(200, { "content-type": "application/json" });
+          res.end(JSON.stringify({
+            type: "file-data", requestId: body.requestId, fileId: body.fileId,
+            scope: body.scope,
+            originalContent: contents.originalContent,
+            modifiedContent: contents.modifiedContent,
+          }));
+        } catch (err) {
+          res.writeHead(200, { "content-type": "application/json" });
+          res.end(JSON.stringify({
+            type: "file-error", requestId: body.requestId, fileId: body.fileId,
+            scope: body.scope, message: err instanceof Error ? err.message : String(err),
+          }));
+        }
+        return;
+      }
+      if (req.method === "POST" && req.url === "/api/submit") {
+        const body = await readJsonBody(req);
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify({ ok: true }));
+        finish(body);
+        return;
+      }
+      if (req.method === "POST" && req.url === "/api/cancel") {
+        await readJsonBody(req).catch(() => ({}));
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify({ ok: true }));
+        finish({ type: "cancel" });
+        return;
+      }
+      res.writeHead(404, { "content-type": "text/plain" });
+      res.end("Not found");
+    } catch (err) {
+      res.writeHead(500, { "content-type": "text/plain" });
+      res.end(String(err));
+    }
+  });
+
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const port = server.address().port;
+  return { server, url: `http://127.0.0.1:${port}/`, resultPromise };
+}
+
 async function main() {
   let args;
   try {
@@ -142,8 +224,6 @@ async function main() {
     process.stdout.write(HELP);
     return;
   }
-
-  preflightGlimpse();
 
   const cwd = process.cwd();
   const repoRoot = await getRepoRoot(cwd);
@@ -166,108 +246,32 @@ async function main() {
     baseRefName: ctx.baseRefName ?? null,
   });
 
-  const titleSuffix = ctx.baseRefName ? ` (vs ${ctx.baseRefName})` : ` (${args.scope})`;
-  const win = open(html, {
-    width: 1680,
-    height: 1020,
-    title: `slop review${titleSuffix}`,
+  const { server, url, resultPromise } = await startReviewServer({
+    html,
+    files,
+    repoRoot,
+    gitDiffOriginalRef: ctx.gitDiffOriginalRef,
+    loadFileContents: loadReviewFileContents,
   });
 
-  log(`Opened review window for ${repoRoot} (${files.length} files, scope: ${args.scope}${ctx.baseRefName ? `, base: ${ctx.baseRefName}` : ""}).`);
+  openBrowser(url);
+  log(`Opened review at ${url} (${files.length} files, scope: ${args.scope}${ctx.baseRefName ? `, base: ${ctx.baseRefName}` : ""}).`);
 
-  const fileMap = new Map(files.map((f) => [f.id, f]));
-  const contentCache = new Map();
-
-  const sendWindowMessage = (message) => {
-    const payload = escapeForInlineScript(JSON.stringify(message));
-    try {
-      win.send(`window.__reviewReceive(${payload});`);
-    } catch {
-      /* window already gone */
-    }
-  };
-
-  const loadContents = (file, scope) => {
-    const key = `${scope}:${file.id}`;
-    const cached = contentCache.get(key);
-    if (cached != null) return cached;
-    const pending = loadReviewFileContents(repoRoot, file, scope, { gitDiffOriginalRef: ctx.gitDiffOriginalRef });
-    contentCache.set(key, pending);
-    return pending;
-  };
-
-  const handleRequestFile = async (message) => {
-    const file = fileMap.get(message.fileId);
-    if (file == null) {
-      sendWindowMessage({
-        type: "file-error",
-        requestId: message.requestId,
-        fileId: message.fileId,
-        scope: message.scope,
-        message: "Unknown file requested.",
-      });
-      return;
-    }
-    try {
-      const contents = await loadContents(file, message.scope);
-      sendWindowMessage({
-        type: "file-data",
-        requestId: message.requestId,
-        fileId: message.fileId,
-        scope: message.scope,
-        originalContent: contents.originalContent,
-        modifiedContent: contents.modifiedContent,
-      });
-    } catch (error) {
-      const messageText = error instanceof Error ? error.message : String(error);
-      sendWindowMessage({
-        type: "file-error",
-        requestId: message.requestId,
-        fileId: message.fileId,
-        scope: message.scope,
-        message: messageText,
-      });
-    }
-  };
-
-  const terminalMessage = await new Promise((resolve, reject) => {
-    let settled = false;
+  let settled = false;
+  const terminalMessage = await new Promise((resolve) => {
     const settle = (value) => {
       if (settled) return;
       settled = true;
-      win.removeListener("message", onMessage);
-      win.removeListener("closed", onClosed);
-      win.removeListener("error", onError);
       resolve(value);
     };
-    const onMessage = (data) => {
-      const message = data;
-      if (message?.type === "request-file") {
-        void handleRequestFile(message);
-        return;
-      }
-      if (message?.type === "submit" || message?.type === "cancel") {
-        settle(message);
-      }
-    };
-    const onClosed = () => settle(null);
-    const onError = (err) => {
-      if (settled) return;
-      settled = true;
-      reject(err);
-    };
-
-    win.on("message", onMessage);
-    win.on("closed", onClosed);
-    win.on("error", onError);
-
+    resultPromise.then(settle);
     process.once("SIGINT", () => {
-      try { win.close(); } catch {}
-      settle(null);
+      try { server.close(); } catch {}
+      settle({ type: "cancel" });
     });
   });
 
-  try { win.close(); } catch {}
+  try { server.close(); } catch {}
 
   if (terminalMessage == null || terminalMessage.type === "cancel") {
     log("Review cancelled.");
@@ -282,8 +286,11 @@ async function main() {
   log(`Wrote feedback to ${outPath}`);
 }
 
-main().catch((err) => {
-  const message = err instanceof Error ? err.message : String(err);
-  process.stderr.write(`slop-review failed: ${message}\n`);
-  process.exit(1);
-});
+const invokedDirectly = process.argv[1] && import.meta.url === `file://${process.argv[1]}`;
+if (invokedDirectly) {
+  main().catch((err) => {
+    const message = err instanceof Error ? err.message : String(err);
+    process.stderr.write(`slop-review failed: ${message}\n`);
+    process.exit(1);
+  });
+}
