@@ -32,6 +32,19 @@ test("GET / returns the inlined html", async () => {
   } finally { server.close(); }
 });
 
+test("GET /launcher returns the script-window launcher page", async () => {
+  const { server, url } = await start();
+  try {
+    const res = await fetch(`${url}launcher`);
+    assert.equal(res.status, 200);
+    const text = await res.text();
+    assert.match(text, /slop-review/);
+    assert.match(text, /Open review window/);
+    // The launcher must script-open the review window via window.open().
+    assert.match(text, /window\.open\(/);
+  } finally { server.close(); }
+});
+
 test("POST /api/file returns file-data for known file", async () => {
   const { server, url } = await start();
   try {

@@ -21,6 +21,13 @@
 //            "FEEDBACK_FILE: <path>" to stdout.
 // On cancel / browser tab closed via Cancel button / SIGINT: prints "REVIEW_CANCELLED" to stdout.
 // On error: prints message to stderr and exits 1.
+//
+// Window behavior:
+//   --open window (default): opens a tiny "launcher" helper tab that script-opens the
+//       review window via window.open(). Because that review window is script-opened,
+//       clicking Finish/Cancel truly closes it (window.close() is honored).
+//   --open tab: opens the review page directly (legacy). On Finish/Cancel the tab can't
+//       be script-closed by the browser, so a "you may close this tab" overlay is shown.
 
 import { writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -52,6 +59,9 @@ Scopes (positional or --scope <name>):
 Options:
   --base <ref>  override base branch (default: auto-detect origin/HEAD,
                 origin/main, main, origin/master, master)
+  --open <mode> how to open the review: "window" (default) opens a launcher tab that
+                script-opens a closeable review window; "tab" opens the review page
+                directly (legacy; shows a close overlay on finish instead of closing).
   -h, --help    show this help and exit
 `;
 
@@ -74,6 +84,90 @@ function openBrowser(url) {
   } catch {
     /* 浏览器唤起失败不影响服务本身 */
   }
+}
+
+/**
+ * Minimal self-contained "launcher" page. The CLI opens this tab via the OS
+ * `open` command (so it can't be script-closed), and this page in turn opens the
+ * real review window via window.open() on a user click. Because the review window
+ * is script-opened, the browser allows it to close itself on Finish/Cancel.
+ */
+function buildLauncherHtml() {
+  return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>slop-review</title>
+<style>
+  :root { color-scheme: light dark; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    display: flex; align-items: center; justify-content: center;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: #0d1117; color: #c9d1d9;
+  }
+  @media (prefers-color-scheme: light) {
+    body { background: #ffffff; color: #1f2328; }
+  }
+  .card {
+    max-width: 440px; padding: 28px 32px; border-radius: 12px; text-align: center;
+    background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.1);
+    box-shadow: 0 8px 30px rgba(0,0,0,0.3);
+  }
+  @media (prefers-color-scheme: light) {
+    .card { background: #f6f8fa; border-color: #d0d7de; box-shadow: 0 8px 30px rgba(0,0,0,0.08); }
+  }
+  h1 { font-size: 18px; margin: 0 0 8px; }
+  #msg { font-size: 14px; line-height: 1.5; opacity: 0.9; margin: 0 0 16px; }
+  button {
+    font-size: 14px; padding: 10px 18px; border-radius: 8px; border: 0; cursor: pointer;
+    background: #238636; color: #fff; font-weight: 600;
+  }
+  button:hover { background: #2ea043; }
+  .hint { margin-top: 14px; font-size: 12px; opacity: 0.6; }
+  .done { color: #3fb950; font-weight: 600; }
+</style>
+</head>
+<body>
+  <div class="card">
+    <h1>slop-review</h1>
+    <p id="msg">Opening the review window…</p>
+    <button id="openBtn" style="display:none">Open review window</button>
+    <div class="hint" id="hint">The review window is opened by a script so it can close itself when you finish.</div>
+  </div>
+<script>
+  (function () {
+    var reviewUrl = location.origin + "/";
+    var msg = document.getElementById("msg");
+    var btn = document.getElementById("openBtn");
+    var hint = document.getElementById("hint");
+    function openReview() {
+      var w = window.open(reviewUrl, "slopReview");
+      if (!w) return false;
+      msg.textContent = "Review window opened.";
+      btn.style.display = "none";
+      hint.textContent = "When you finish the review, that window closes itself. You may close this tab afterwards.";
+      var t = setInterval(function () {
+        if (w.closed) {
+          clearInterval(t);
+          msg.innerHTML = '<span class="done">Review complete.</span>';
+          hint.textContent = "You may close this tab now.";
+        }
+      }, 500);
+      return true;
+    }
+    btn.addEventListener("click", openReview);
+    // Auto-attempt on load; popup blockers require a user gesture, so fall back to the button.
+    if (!openReview()) {
+      msg.textContent = "Your browser blocked the automatic popup.";
+      btn.style.display = "inline-block";
+      hint.textContent = "Click the button below to open the review window.";
+    }
+  })();
+</script>
+</body>
+</html>`;
 }
 
 function readJsonBody(req) {
@@ -152,6 +246,11 @@ export async function startReviewServer({ html, files, repoRoot, gitDiffOriginal
       if (req.method === "GET" && req.url === "/") {
         res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
         res.end(html);
+        return;
+      }
+      if (req.method === "GET" && req.url === "/launcher") {
+        res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+        res.end(buildLauncherHtml());
         return;
       }
       if (req.method === "POST" && req.url === "/api/file") {
@@ -254,8 +353,11 @@ async function main() {
     loadFileContents: loadReviewFileContents,
   });
 
-  openBrowser(url);
-  log(`Opened review at ${url} (${files.length} files, scope: ${args.scope}${ctx.baseRefName ? `, base: ${ctx.baseRefName}` : ""}).`);
+  // --open window (default): open the launcher tab, which script-opens a closeable
+  //   review window. --open tab: open the review page directly (legacy overlay fallback).
+  const launchUrl = args.open === "tab" ? url : `${url}launcher`;
+  openBrowser(launchUrl);
+  log(`Opened review (mode: ${args.open}) at ${url} (${files.length} files, scope: ${args.scope}${ctx.baseRefName ? `, base: ${ctx.baseRefName}` : ""}).`);
 
   let settled = false;
   const terminalMessage = await new Promise((resolve) => {

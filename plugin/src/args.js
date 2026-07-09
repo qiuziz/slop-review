@@ -3,11 +3,12 @@
 // guarantees both surfaces accept exactly the same syntax.
 //
 // Accepted forms (positional or flag):
-//   slop-review [base|last-commit|uncommitted|all] [--base <ref>]
+//   slop-review [base|last-commit|uncommitted|all] [--base <ref>] [--open <mode>]
 //
-// Returns: { scope, base } or throws on unknown args / invalid scope.
+// Returns: { scope, base, open, help } or throws on unknown args / invalid scope.
 
 export const VALID_SCOPES = new Set(["base", "last-commit", "uncommitted", "all"]);
+export const VALID_OPEN_MODES = new Set(["window", "tab"]);
 
 // CLI scope -> initial tab in the web UI.
 export const INITIAL_TAB = {
@@ -19,10 +20,10 @@ export const INITIAL_TAB = {
 
 /**
  * @param {string[]} argv  e.g. process.argv.slice(2), or `argString.trim().split(/\s+/).filter(Boolean)`
- * @returns {{ scope: "base"|"last-commit"|"uncommitted"|"all", base: string|null, help: boolean }}
+ * @returns {{ scope: "base"|"last-commit"|"uncommitted"|"all", base: string|null, open: "window"|"tab", help: boolean }}
  */
 export function parseArgs(argv) {
-  const args = { scope: "base", base: null, help: false };
+  const args = { scope: "base", base: null, open: "window", help: false };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "-h" || a === "--help") {
@@ -35,6 +36,10 @@ export function parseArgs(argv) {
       args.base = argv[++i];
     } else if (a.startsWith("--base=")) {
       args.base = a.slice("--base=".length);
+    } else if (a === "--open" || a === "-o") {
+      args.open = argv[++i];
+    } else if (a.startsWith("--open=")) {
+      args.open = a.slice("--open=".length);
     } else if (VALID_SCOPES.has(a)) {
       args.scope = a;
     } else {
@@ -43,6 +48,9 @@ export function parseArgs(argv) {
   }
   if (!VALID_SCOPES.has(args.scope)) {
     throw new Error(`Invalid scope "${args.scope}". Must be one of: ${[...VALID_SCOPES].join(", ")}`);
+  }
+  if (args.open !== null && !VALID_OPEN_MODES.has(args.open)) {
+    throw new Error(`Invalid --open mode "${args.open}". Must be one of: ${[...VALID_OPEN_MODES].join(", ")}`);
   }
   return args;
 }

@@ -1,9 +1,18 @@
 <!DOCTYPE html>
-<html lang="en" class="h-full bg-[#0d1117]">
+<html lang="en" class="h-full bg-review-bg">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>slop review</title>
+<script>
+  // Apply the persisted theme before first paint to avoid a flash of the wrong theme.
+  (function () {
+    try {
+      var t = localStorage.getItem("slop-review-theme");
+      if (t === "light" || t === "dark") document.documentElement.setAttribute("data-theme", t);
+    } catch (e) {}
+  })();
+</script>
 <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
 <style type="text/tailwindcss">
   @theme {
@@ -13,6 +22,18 @@
     --color-review-text: #c9d1d9;
     --color-review-muted: #8b949e;
     --color-review-accent: #58a6ff;
+    --color-review-strong: #ffffff;
+    --color-review-header: #010409;
+    --color-review-code: #010409;
+    --color-review-hover: #21262d;
+    --color-review-active: #373e47;
+    --color-review-disabled: #11161d;
+    --color-review-badge: #1f2937;
+    --color-review-green: #238636;
+    --color-review-green-hover: #2ea043;
+    --color-review-green-text: #3fb950;
+    --color-review-yellow-text: #d29922;
+    --color-review-red-text: #f85149;
   }
 </style>
 <style>
@@ -22,15 +43,90 @@
     overflow: hidden;
   }
 
+  :root {
+    --review-scrim: rgba(1, 4, 9, 0.8);
+  }
+
+  /* Light theme — forced via data-theme="light" */
+  [data-theme="light"] {
+    --color-review-bg: #ffffff;
+    --color-review-panel: #f6f8fa;
+    --color-review-border: #d0d7de;
+    --color-review-text: #1f2328;
+    --color-review-muted: #59636e;
+    --color-review-accent: #0969da;
+    --color-review-strong: #1f2328;
+    --color-review-header: #f6f8fa;
+    --color-review-code: #f6f8fa;
+    --color-review-hover: #eaeef2;
+    --color-review-active: #d0d7de;
+    --color-review-disabled: #eaeef2;
+    --color-review-badge: #d8dee4;
+    --color-review-green: #1a7f37;
+    --color-review-green-hover: #1c8139;
+    --color-review-green-text: #1a7f37;
+    --color-review-yellow-text: #9a6700;
+    --color-review-red-text: #cf222e;
+    --review-scrim: rgba(31, 35, 40, 0.5);
+  }
+
+  /* Dark theme — forced via data-theme="dark" */
+  [data-theme="dark"] {
+    --color-review-bg: #0d1117;
+    --color-review-panel: #161b22;
+    --color-review-border: #30363d;
+    --color-review-text: #c9d1d9;
+    --color-review-muted: #8b949e;
+    --color-review-accent: #58a6ff;
+    --color-review-strong: #ffffff;
+    --color-review-header: #010409;
+    --color-review-code: #010409;
+    --color-review-hover: #21262d;
+    --color-review-active: #373e47;
+    --color-review-disabled: #11161d;
+    --color-review-badge: #1f2937;
+    --color-review-green: #238636;
+    --color-review-green-hover: #2ea043;
+    --color-review-green-text: #3fb950;
+    --color-review-yellow-text: #d29922;
+    --color-review-red-text: #f85149;
+    --review-scrim: rgba(1, 4, 9, 0.8);
+  }
+
+  /* System theme — follow the OS preference when no explicit choice is made */
+  @media (prefers-color-scheme: light) {
+    html:not([data-theme="dark"]):not([data-theme="light"]) {
+      --color-review-bg: #ffffff;
+      --color-review-panel: #f6f8fa;
+      --color-review-border: #d0d7de;
+      --color-review-text: #1f2328;
+      --color-review-muted: #59636e;
+      --color-review-accent: #0969da;
+      --color-review-strong: #1f2328;
+      --color-review-header: #f6f8fa;
+      --color-review-code: #f6f8fa;
+      --color-review-hover: #eaeef2;
+      --color-review-active: #d0d7de;
+      --color-review-disabled: #eaeef2;
+      --color-review-badge: #d8dee4;
+      --color-review-green: #1a7f37;
+      --color-review-green-hover: #1c8139;
+      --color-review-green-text: #1a7f37;
+      --color-review-yellow-text: #9a6700;
+      --color-review-red-text: #cf222e;
+      --review-scrim: rgba(31, 35, 40, 0.5);
+    }
+  }
+
   .scrollbar-thin::-webkit-scrollbar {
     width: 10px;
     height: 10px;
   }
 
   .scrollbar-thin::-webkit-scrollbar-thumb {
-    background: #30363d;
+    background: var(--color-review-border);
     border-radius: 999px;
-    border: 3px solid #161b22;
+    border: 3px solid var(--color-review-panel);
   }
 
   .scrollbar-thin::-webkit-scrollbar-track {
@@ -40,7 +136,7 @@
   .review-modal-backdrop {
     position: fixed;
     inset: 0;
-    background: rgba(1, 4, 9, 0.8);
+    background: var(--review-scrim);
     backdrop-filter: blur(4px);
     display: flex;
     align-items: center;
@@ -50,8 +146,8 @@
 
   .review-modal-card {
     width: min(760px, 92vw);
-    background: #161b22;
-    border: 1px solid #30363d;
+    background: var(--color-review-panel);
+    border: 1px solid var(--color-review-border);
     border-radius: 12px;
     box-shadow: 0 16px 64px rgba(0, 0, 0, 0.5);
     padding: 24px;
@@ -75,9 +171,9 @@
 
   .view-zone-container {
     padding: 8px 16px 10px 16px;
-    border-top: 1px solid #30363d;
-    border-bottom: 1px solid #30363d;
-    background: #161b22;
+    border-top: 1px solid var(--color-review-border);
+    border-bottom: 1px solid var(--color-review-border);
+    background: var(--color-review-panel);
     overflow: visible;
   }
 
@@ -125,53 +221,54 @@
 </head>
 <body class="h-full overflow-hidden bg-review-bg text-review-text antialiased">
 <div id="root-layout" class="flex h-full w-full flex-col">
-  <div class="flex items-center justify-between gap-4 border-b border-review-border bg-[#010409] px-4 py-3">
+  <div class="flex items-center justify-between gap-4 border-b border-review-border bg-review-header px-4 py-3">
     <div class="min-w-0 flex items-center gap-3">
-      <button id="toggle-sidebar-button" class="cursor-pointer rounded-md border border-review-border bg-review-panel px-3 py-1.5 text-xs font-medium text-review-text hover:bg-[#21262d]">Hide sidebar</button>
+      <button id="toggle-sidebar-button" class="cursor-pointer rounded-md border border-review-border bg-review-panel px-3 py-1.5 text-xs font-medium text-review-text hover:bg-review-hover">Hide sidebar</button>
       <div class="min-w-0">
-        <div id="window-title" class="text-[15px] font-semibold text-white">Review</div>
+        <div id="window-title" class="text-[15px] font-semibold text-review-strong">Review</div>
         <div id="repo-root" class="truncate text-[11px] text-review-muted"></div>
       </div>
     </div>
     <div class="flex items-center gap-2">
       <div id="summary" class="max-w-[24rem] truncate text-[11px] text-review-muted"></div>
-      <button id="overall-comment-button" class="cursor-pointer rounded-md border border-review-border bg-review-panel px-3 py-1.5 text-xs font-medium text-review-text hover:bg-[#21262d]">Overall note</button>
+      <button id="theme-button" class="cursor-pointer rounded-md border border-review-border bg-review-panel px-3 py-1.5 text-xs font-medium text-review-text hover:bg-review-hover">Theme: Auto</button>
+      <button id="overall-comment-button" class="cursor-pointer rounded-md border border-review-border bg-review-panel px-3 py-1.5 text-xs font-medium text-review-text hover:bg-review-hover">Overall note</button>
       <button id="cancel-button" class="cursor-pointer rounded-md border border-review-border bg-review-panel px-3 py-1.5 text-xs font-medium text-review-text hover:bg-red-500/10 hover:text-red-400 hover:border-red-500/30">Cancel</button>
-      <button id="submit-button" class="cursor-pointer rounded-md border border-[rgba(240,246,252,0.1)] bg-[#238636] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#2ea043] disabled:cursor-default disabled:opacity-50 disabled:hover:bg-[#238636]">Finish review</button>
+      <button id="submit-button" class="cursor-pointer rounded-md border border-[rgba(240,246,252,0.1)] bg-review-green px-3 py-1.5 text-xs font-medium text-white hover:bg-review-green-hover disabled:cursor-default disabled:opacity-50 disabled:hover:bg-review-green">Finish review</button>
     </div>
   </div>
 
   <div id="content-layout" class="flex min-h-0 flex-1">
-    <aside id="sidebar" class="flex min-h-0 shrink-0 flex-col border-r border-review-border bg-[#0d1117]" style="width: 280px; min-width: 280px; flex-basis: 280px; overflow: hidden;">
+    <aside id="sidebar" class="flex min-h-0 shrink-0 flex-col border-r border-review-border bg-review-bg" style="width: 280px; min-width: 280px; flex-basis: 280px; overflow: hidden;">
     <div class="border-b border-review-border px-4 py-3">
       <div class="mb-2 flex items-center justify-between gap-2">
         <div id="sidebar-title" class="text-[11px] font-semibold uppercase tracking-wider text-review-muted">Files</div>
         <div class="text-[10px] text-review-muted">Fuzzy filter</div>
       </div>
       <div class="mb-3 flex flex-wrap items-center gap-2">
-        <button id="scope-diff-button" class="cursor-pointer rounded-md border border-review-border bg-review-panel px-2.5 py-1 text-[11px] font-medium text-review-text hover:bg-[#21262d]">Git diff</button>
-        <button id="scope-last-commit-button" class="cursor-pointer rounded-md border border-review-border bg-review-panel px-2.5 py-1 text-[11px] font-medium text-review-text hover:bg-[#21262d]">Last commit</button>
-        <button id="scope-all-button" class="cursor-pointer rounded-md border border-review-border bg-review-panel px-2.5 py-1 text-[11px] font-medium text-review-text hover:bg-[#21262d]">All files</button>
+        <button id="scope-diff-button" class="cursor-pointer rounded-md border border-review-border bg-review-panel px-2.5 py-1 text-[11px] font-medium text-review-text hover:bg-review-hover">Git diff</button>
+        <button id="scope-last-commit-button" class="cursor-pointer rounded-md border border-review-border bg-review-panel px-2.5 py-1 text-[11px] font-medium text-review-text hover:bg-review-hover">Last commit</button>
+        <button id="scope-all-button" class="cursor-pointer rounded-md border border-review-border bg-review-panel px-2.5 py-1 text-[11px] font-medium text-review-text hover:bg-review-hover">All files</button>
       </div>
       <input id="sidebar-search-input" type="text" spellcheck="false" autocomplete="off" placeholder="Search files" class="w-full rounded-md border border-review-border bg-review-panel px-3 py-2 text-sm text-review-text outline-none placeholder:text-review-muted focus:border-blue-500 focus:ring-1 focus:ring-blue-500">
     </div>
     <div id="file-tree" class="scrollbar-thin min-h-0 flex-1 overflow-auto px-2 pb-2"></div>
   </aside>
 
-    <main id="main-pane" class="flex min-h-0 min-w-0 flex-1 flex-col bg-[#0d1117]">
-    <div class="flex items-center justify-between gap-4 border-b border-review-border bg-[#0d1117] px-4 py-2">
+    <main id="main-pane" class="flex min-h-0 min-w-0 flex-1 flex-col bg-review-bg">
+    <div class="flex items-center justify-between gap-4 border-b border-review-border bg-review-bg px-4 py-2">
       <div class="min-w-0">
-        <div id="current-file-label" class="truncate text-sm font-semibold text-white"></div>
+        <div id="current-file-label" class="truncate text-sm font-semibold text-review-strong"></div>
         <div id="mode-hint" class="mt-0.5 text-[11px] text-review-muted"></div>
       </div>
       <div class="flex items-center gap-3">
-        <button id="toggle-reviewed-button" class="cursor-pointer rounded-md border border-review-border bg-review-panel px-3 py-1 text-xs font-medium text-review-text hover:bg-[#21262d]">Mark reviewed</button>
-        <button id="toggle-wrap-button" class="cursor-pointer rounded-md border border-review-border bg-review-panel px-3 py-1 text-xs font-medium text-review-text hover:bg-[#21262d]">Wrap lines: on</button>
-        <button id="toggle-unchanged-button" class="cursor-pointer rounded-md border border-review-border bg-review-panel px-3 py-1 text-xs font-medium text-review-text hover:bg-[#21262d]">Show changed areas only</button>
-        <button id="file-comment-button" class="cursor-pointer rounded-md border border-review-border bg-review-panel px-3 py-1 text-xs font-medium text-review-text hover:bg-[#21262d]">Add file comment</button>
+        <button id="toggle-reviewed-button" class="cursor-pointer rounded-md border border-review-border bg-review-panel px-3 py-1 text-xs font-medium text-review-text hover:bg-review-hover">Mark reviewed</button>
+        <button id="toggle-wrap-button" class="cursor-pointer rounded-md border border-review-border bg-review-panel px-3 py-1 text-xs font-medium text-review-text hover:bg-review-hover">Wrap lines: on</button>
+        <button id="toggle-unchanged-button" class="cursor-pointer rounded-md border border-review-border bg-review-panel px-3 py-1 text-xs font-medium text-review-text hover:bg-review-hover">Show changed areas only</button>
+        <button id="file-comment-button" class="cursor-pointer rounded-md border border-review-border bg-review-panel px-3 py-1 text-xs font-medium text-review-text hover:bg-review-hover">Add file comment</button>
       </div>
     </div>
-    <div id="file-comments-container" class="hidden border-b border-review-border bg-[#0d1117] px-4 py-0"></div>
+    <div id="file-comments-container" class="hidden border-b border-review-border bg-review-bg px-4 py-0"></div>
     <div id="editor-container" class="min-h-0 min-w-0 flex-1"></div>
     </main>
   </div>
