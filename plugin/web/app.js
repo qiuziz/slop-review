@@ -367,6 +367,17 @@ function ensureFileLoaded(fileId, scope = state.currentScope) {
   renderTree();
   if (window.glimpse?.send) {
     window.glimpse.send({ type: "request-file", requestId, fileId, scope });
+  } else {
+    fetch("/api/file", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ requestId, fileId, scope }),
+    })
+      .then((r) => r.json())
+      .then((message) => window.__reviewReceive(message))
+      .catch((err) => window.__reviewReceive({
+        type: "file-error", requestId, fileId, scope, message: String(err),
+      }));
   }
 }
 
@@ -1038,13 +1049,34 @@ submitButton.addEventListener("click", () => {
       .map((comment) => ({ ...comment, body: comment.body.trim() }))
       .filter((comment) => comment.body.length > 0),
   };
-  window.glimpse.send(payload);
-  window.glimpse.close();
+  if (window.glimpse?.send) {
+    window.glimpse.send(payload);
+    window.glimpse.close();
+  } else {
+    submitButton.disabled = true;
+    cancelButton.disabled = true;
+    fetch("/api/submit", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(payload),
+    }).catch(() => {});
+  }
 });
 
 cancelButton.addEventListener("click", () => {
-  window.glimpse.send({ type: "cancel" });
-  window.glimpse.close();
+  const payload = { type: "cancel" };
+  if (window.glimpse?.send) {
+    window.glimpse.send(payload);
+    window.glimpse.close();
+  } else {
+    submitButton.disabled = true;
+    cancelButton.disabled = true;
+    fetch("/api/cancel", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(payload),
+    }).catch(() => {});
+  }
 });
 
 overallCommentButton.addEventListener("click", () => {
